@@ -1039,6 +1039,7 @@ func (t *http2Client) Write(s *Stream, hdr []byte, data []byte, opts *Options) e
 	}
 	df := &dataFrame{
 		streamID:  s.id,
+		ctx:       s.ctx,
 		endStream: opts.Last,
 		h:         hdr,
 		d:         data,

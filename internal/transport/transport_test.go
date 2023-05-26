@@ -180,6 +180,7 @@ func (h *testStreamHandler) handleStreamMisbehave(t *testing.T, s *Stream) {
 		}
 		conn.controlBuf.put(&dataFrame{
 			streamID:    s.id,
+			ctx:         s.ctx,
 			h:           nil,
 			d:           p,
 			onEachWrite: func() {},
@@ -1013,6 +1014,7 @@ func (s) TestServerContextCanceledOnClosedConnection(t *testing.T) {
 	}
 	ct.controlBuf.put(&dataFrame{
 		streamID:    s.id,
+		ctx:         s.ctx,
 		endStream:   false,
 		h:           nil,
 		d:           make([]byte, http2MaxFrameLen),

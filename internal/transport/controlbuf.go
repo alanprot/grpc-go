@@ -20,6 +20,7 @@ package transport
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -146,6 +147,7 @@ func (*earlyAbortStream) isTransportResponseFrame() bool { return false }
 
 type dataFrame struct {
 	streamID  uint32
+	ctx       context.Context
 	endStream bool
 	h         []byte
 	d         []byte
@@ -957,6 +959,12 @@ func (l *loopyWriter) processData() (bool, error) {
 		}
 	} else {
 		buf = dataItem.d
+	}
+
+	select {
+	case <-dataItem.ctx.Done():
+		return false, ContextErr(dataItem.ctx.Err())
+	default:
 	}
 
 	size := hSize + dSize
