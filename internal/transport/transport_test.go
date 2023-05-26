@@ -109,6 +109,17 @@ func (h *testStreamHandler) handleStreamAndNotify(s *Stream) {
 func (h *testStreamHandler) handleStream(t *testing.T, s *Stream) {
 	req := expectedRequest
 	resp := expectedResponse
+
+	if s.Method() == "foo.CancelledContext" {
+		p := make([]byte, len(req))
+		_, err := s.Read(p)
+		if err == nil {
+			t.Errorf("context not cancelled: read %v", string(p))
+			return
+		}
+		t.Errorf("Got foo.CancelledContext %v", string(p))
+	}
+
 	if s.Method() == "foo.Large" {
 		req = expectedRequestLarge
 		resp = expectedResponseLarge
@@ -2656,4 +2667,36 @@ func (s) TestPeerSetInServerContext(t *testing.T) {
 		}
 	}
 	server.mu.Unlock()
+}
+
+func (s) TestClientCancelledContext(t *testing.T) {
+	server, ct, cancel := setUp(t, 0, math.MaxUint32, normal)
+	defer cancel()
+	callHdr := &CallHdr{
+		Host:   "localhost",
+		Method: "foo.CancelledContext",
+	}
+	ctx, ctxCancel := context.WithCancel(context.Background())
+	ctxCancel()
+
+	for i := 0; i < 100; i++ {
+		s1, _ := ct.NewStream(ctx, callHdr)
+		opts := Options{Last: true}
+
+		req := []byte("ping")
+		if err := ct.Write(s1, nil, req, &opts); err != nil {
+			t.Errorf("Error: %v;", err)
+		}
+
+		if _, err := s1.Read(make([]byte, 10)); err == nil && strings.Contains(err.Error(), "Canceled") {
+			t.Errorf("Error: %v; want <EOF>", err)
+		}
+
+		req[0] = byte('T')
+		req[2] = byte('U')
+		time.Sleep(100 * time.Millisecond)
+
+		ct.Close(fmt.Errorf("closed manually by test"))
+	}
+	server.stop()
 }
