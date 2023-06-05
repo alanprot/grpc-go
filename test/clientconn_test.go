@@ -28,12 +28,71 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/internal/channelz"
+	"google.golang.org/grpc/internal/stubserver"
 	testgrpc "google.golang.org/grpc/interop/grpc_testing"
 	testpb "google.golang.org/grpc/interop/grpc_testing"
 	"google.golang.org/grpc/resolver/manual"
 	"google.golang.org/grpc/status"
 )
+
+type CustomCodec struct {
+	protoCodec encoding.Codec
+}
+
+func (c *CustomCodec) Marshal(v interface{}) ([]byte, error) {
+	if r, ok := v.(*testpb.SimpleRequest); ok {
+		time.Sleep(10 * time.Millisecond)
+		return r.Payload.Body, nil
+	}
+	return c.protoCodec.Marshal(v)
+}
+
+func (c *CustomCodec) Unmarshal(data []byte, v interface{}) error {
+	if r, ok := v.(*testpb.SimpleRequest); ok {
+		r.Payload = &testpb.Payload{
+			Body: data,
+		}
+		return nil
+	}
+
+	return c.protoCodec.Unmarshal(data, v)
+}
+
+func (c *CustomCodec) Name() string {
+	return "mycodec"
+}
+
+func Test_ContextCancelled(t *testing.T) {
+	encoding.RegisterCodec(&CustomCodec{protoCodec: encoding.GetCodec("proto")})
+	ss := &stubserver.StubServer{
+		UnaryCallF: func(ctx context.Context, in *testpb.SimpleRequest) (*testpb.SimpleResponse, error) {
+			if string(in.Payload.Body) != "right" {
+				t.Errorf("Received wrong body %v\n", string(in.Payload.Body))
+			}
+			return &testpb.SimpleResponse{Payload: &testpb.Payload{Body: in.Payload.Body}}, nil
+		},
+	}
+	err := ss.Start([]grpc.ServerOption{})
+
+	if err != nil {
+		t.Fatalf("Error starting endpoint server: %v", err)
+	}
+	defer ss.Stop()
+
+	for i := 0; i < 100; i++ {
+		req := &testpb.SimpleRequest{
+			Payload: &testpb.Payload{
+				Type: testpb.PayloadType_COMPRESSABLE,
+				Body: []byte("right"),
+			},
+		}
+		ctx, _ := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		ss.Client.UnaryCall(ctx, req, grpc.CallContentSubtype("mycodec"))
+		copy(req.Payload.Body, "wrong")
+	}
+}
 
 // TestClientConnClose_WithPendingRPC tests the scenario where the channel has
 // not yet received any update from the name resolver and hence RPCs are
